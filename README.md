@@ -2,7 +2,7 @@
 
 Turn any Japanese words into Anki flashcards that teach you how to write them.
 
-**Live app:** https://www.perplexity.ai/computer/a/nihongo-writer-oyuZw3UiQb2FanK.AIKigg
+**Live app:** https://joistad.github.io/nihongo-writer/
 
 ## Features
 
@@ -16,7 +16,7 @@ Turn any Japanese words into Anki flashcards that teach you how to write them.
 
 ## Usage
 
-1. Open the live app
+1. Open the [live app](https://joistad.github.io/nihongo-writer/)
 2. Type or paste Japanese words (separated by spaces or new lines), or pick from a suggested word list
 3. Optionally expand "Want to add word audio?" and paste a Google Cloud TTS API key
 4. Click **Download Anki Deck** — import the `.apkg` file into Anki
