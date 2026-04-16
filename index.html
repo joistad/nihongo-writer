@@ -1124,6 +1124,20 @@ function toggleDark() {
   document.getElementById('darkIcon').textContent = isDark ? '☀️' : '🌙';
 }
 
+// Auto-apply dark mode based on system preference
+(function () {
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    document.body.classList.add('dark');
+    document.getElementById('darkIcon').textContent = '☀️';
+  }
+  // Also respond to live changes (e.g. user switches OS theme while page is open)
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+    const shouldBeDark = e.matches;
+    document.body.classList.toggle('dark', shouldBeDark);
+    document.getElementById('darkIcon').textContent = shouldBeDark ? '☀️' : '🌙';
+  });
+})();
+
 function generateGuid() {
   // Random 10-char base-62 string — globally unique across sessions
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
