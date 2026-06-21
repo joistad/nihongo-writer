@@ -613,7 +613,50 @@ const PITCH_LABELS = {
   nakadaka: '中高', odaka: '尾高', kifuku: '起伏'
 };
 
-// ── Jisho API lookup (replaced Jotoba which went offline) ───────────────────────────
+// ── Kanjium pitch accent data (fetched once from GitHub Pages) ───────────────────────
+let _pitchData = null;  // null = loading, {} = loaded (possibly empty)
+let _pitchReady = false;
+
+(async function loadPitchData() {
+  try {
+    // Served alongside index.html on GitHub Pages
+    const base = 'https://joistad.github.io/nihongo-writer/pitch.json';
+    const res = await fetch(base);
+    if (!res.ok) throw new Error('pitch.json not found');
+    _pitchData = await res.json();
+    _pitchReady = true;
+  } catch(e) {
+    _pitchData = {};
+    _pitchReady = true;
+  }
+})();
+
+// Map kanjium pitch number + reading length → Migaku type
+function kanjiumTypeFromNumber(n, moraCount) {
+  if (n === 0) return 'heiban';
+  if (n === 1) return 'atamadaka';
+  if (n >= moraCount) return 'odaka';
+  return 'nakadaka';
+}
+
+function moraCount(kana) {
+  // Each kana char is one mora, except small kana (ぁぃぅぇぉっゃゅょゎ etc.) which attach to prior
+  const small = /[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ]/;
+  let count = 0;
+  for (const ch of kana) { if (!small.test(ch)) count++; }
+  return count || 1;
+}
+
+function pitchTypeFromData(word, reading) {
+  if (!_pitchReady || !_pitchData) return null;
+  // Try word first, then reading
+  let n = _pitchData[word];
+  if (n === undefined) n = _pitchData[reading];
+  if (n === undefined) return 'heiban'; // absent = heiban (most common)
+  return kanjiumTypeFromNumber(n, moraCount(reading));
+}
+
+// ── Jisho API lookup (definitions) + Kanjium (pitch accent) ──────────────────────────
 const JISHO_URL = 'https://jisho.org/api/v1/search/words';
 const _jishoCache = new Map();
 
@@ -639,8 +682,9 @@ async function lookupWord(word) {
         .flatMap(s => (s.english_definitions || []).slice(0, 2))
         .join('; ');
       const pos = (senses[0]?.parts_of_speech || []).join(', ');
-      // Jisho has no pitch data — pitchType stays null
-      result = { reading, meaning: glosses, pos, pitchType: null };
+      // Pitch type from Kanjium data
+      const pitchType = pitchTypeFromData(word, reading);
+      result = { reading, meaning: glosses, pos, pitchType };
     }
     _jishoCache.set(word, result);
     return result;
