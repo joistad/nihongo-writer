@@ -796,13 +796,30 @@ function pitchTypeFromData(word, reading) {
 // ── Jisho API lookup (definitions) + Kanjium (pitch accent) ──────────────────────────
 const JISHO_URL = 'https://jisho.org/api/v1/search/words';
 const _jishoCache = new Map();
+let _jishoLastCall = 0;         // timestamp of last fetch
+const JISHO_MIN_GAP = 180;      // ms between requests (≈5.5 req/s, well under limit)
+
+async function _jishoFetch(word, retries = 3) {
+  // Throttle: wait until MIN_GAP has passed since last call
+  const now = Date.now();
+  const wait = JISHO_MIN_GAP - (now - _jishoLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _jishoLastCall = Date.now();
+
+  const res = await fetch(`${JISHO_URL}?keyword=${encodeURIComponent(word)}`);
+  if (res.status === 429 && retries > 0) {
+    // Rate limited — back off and retry
+    await new Promise(r => setTimeout(r, 600 * (4 - retries)));
+    return _jishoFetch(word, retries - 1);
+  }
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
 
 async function lookupWord(word) {
   if (_jishoCache.has(word)) return _jishoCache.get(word);
   try {
-    const res = await fetch(`${JISHO_URL}?keyword=${encodeURIComponent(word)}`);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    const data  = await _jishoFetch(word);
     const words = data.data || [];
 
     // Find best match: exact word or reading match first, then first result
@@ -819,7 +836,6 @@ async function lookupWord(word) {
         .flatMap(s => (s.english_definitions || []).slice(0, 2))
         .join('; ');
       const pos = (senses[0]?.parts_of_speech || []).join(', ');
-      // Pitch type from Kanjium data
       const pitchType = pitchTypeFromData(word, reading);
       result = { reading, meaning: glosses, pos, pitchType };
     }
@@ -838,7 +854,8 @@ function fallbackMeta(word) {
     const ch = chars[0];
     if (JOYO_SET.has(ch)) {
       const d = KANJI_META[ch] || {};
-      return { reading: d.onyomi || d.kunyomi || '', meaning: d.meaning || '' };
+      // Prefer kunyomi (native reading) for single-kanji fallback — onyomi is rarely how standalone kanji are read
+      return { reading: d.kunyomi || d.onyomi || '', meaning: d.meaning || '' };
     } else if (KANA_SET.has(ch)) {
       const m = KANA_META[ch] || {};
       return { reading: m.romaji || '', meaning: m.type || '' };
