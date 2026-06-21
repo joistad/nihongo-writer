@@ -793,58 +793,34 @@ function pitchTypeFromData(word, reading) {
   return kanjiumTypeFromNumber(n, moraCount(reading));
 }
 
-// ── Jisho API lookup (definitions) + Kanjium (pitch accent) ──────────────────────────
-const JISHO_URL = 'https://jisho.org/api/v1/search/words';
-const _jishoCache = new Map();
-let _jishoLastCall = 0;         // timestamp of last fetch
-const JISHO_MIN_GAP = 180;      // ms between requests (≈5.5 req/s, well under limit)
+// ── JMdict local word lookup (no API, no CORS issues) ───────────────────────────────
+// words.json is served alongside the app — { word: [reading, meaning, pos] }
+let _wordData = null;
+let _wordDataReady = false;
 
-async function _jishoFetch(word, retries = 3) {
-  // Throttle: wait until MIN_GAP has passed since last call
-  const now = Date.now();
-  const wait = JISHO_MIN_GAP - (now - _jishoLastCall);
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  _jishoLastCall = Date.now();
-
-  const res = await fetch(`${JISHO_URL}?keyword=${encodeURIComponent(word)}`);
-  if (res.status === 429 && retries > 0) {
-    // Rate limited — back off and retry
-    await new Promise(r => setTimeout(r, 600 * (4 - retries)));
-    return _jishoFetch(word, retries - 1);
-  }
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
-}
-
-async function lookupWord(word) {
-  if (_jishoCache.has(word)) return _jishoCache.get(word);
+(async function loadWordData() {
   try {
-    const data  = await _jishoFetch(word);
-    const words = data.data || [];
-
-    // Find best match: exact word or reading match first, then first result
-    const exact =
-      words.find(w => w.japanese?.some(j => j.word === word || j.reading === word)) ||
-      words[0] || null;
-
-    let result = null;
-    if (exact) {
-      const jp = exact.japanese?.[0] || {};
-      const reading = jp.reading || jp.word || '';
-      const senses  = exact.senses || [];
-      const glosses = senses.slice(0, 2)
-        .flatMap(s => (s.english_definitions || []).slice(0, 2))
-        .join('; ');
-      const pos = (senses[0]?.parts_of_speech || []).join(', ');
-      const pitchType = pitchTypeFromData(word, reading);
-      result = { reading, meaning: glosses, pos, pitchType };
-    }
-    _jishoCache.set(word, result);
-    return result;
+    const base = 'https://joistad.github.io/nihongo-writer/words.json';
+    const res = await fetch(base);
+    if (!res.ok) throw new Error('words.json not found');
+    _wordData = await res.json();
+    _wordDataReady = true;
+    // Re-enrich the preview if it's already showing
+    if (typeof updateUI === 'function') updateUI();
   } catch(e) {
-    _jishoCache.set(word, null);
-    return null;
+    _wordData = {};
+    _wordDataReady = true;
   }
+})();
+
+function lookupWord(word) {
+  // Synchronous — no API call needed
+  if (!_wordDataReady || !_wordData) return null;
+  const entry = _wordData[word];
+  if (!entry) return null;
+  const [reading, meaning, pos] = entry;
+  const pitchType = pitchTypeFromData(word, reading);
+  return { reading, meaning, pos, pitchType };
 }
 
 // Fallback metadata for a word from embedded KANJI_META / KANA_META
@@ -871,7 +847,6 @@ function fallbackMeta(word) {
 }
 
 // ── Live validation & preview ──────────────────────────────────────────────────────
-let _previewLookupTimeout = null;
 
 function updateUI() {
   const words = parseInputWords(kanjiInput.value);
@@ -931,12 +906,12 @@ function updateUI() {
     previewCards.appendChild(more);
   }
 
-  // Debounced async enrichment of preview with Jotoba readings
-  clearTimeout(_previewLookupTimeout);
-  _previewLookupTimeout = setTimeout(async () => {
+  // Enrich preview from local JMdict data (synchronous — instant, no API needed)
+  // If word data not loaded yet, skip (updateUI will re-run once it loads)
+  if (_wordDataReady) {
     for (let idx = 0; idx < previewWords.length; idx++) {
       const word = previewWords[idx];
-      const meta = await lookupWord(word);
+      const meta = lookupWord(word);
       if (meta) {
         const rEl = document.getElementById(`prev-reading-${idx}`);
         const mEl = document.getElementById(`prev-meaning-${idx}`);
@@ -953,7 +928,7 @@ function updateUI() {
         }
       }
     }
-  }, 600);
+  }
 }
 
 kanjiInput.addEventListener('input', updateUI);
