@@ -613,52 +613,39 @@ const PITCH_LABELS = {
   nakadaka: '中高', odaka: '尾高', kifuku: '起伏'
 };
 
-// ── Jotoba API lookup ──────────────────────────────────────────────────────────────
-const JOTOBA_URL = 'https://jotoba.de/api/search/words';
-const _jotobaCache = new Map();
+// ── Jisho API lookup (replaced Jotoba which went offline) ───────────────────────────
+const JISHO_URL = 'https://jisho.org/api/v1/search/words';
+const _jishoCache = new Map();
 
 async function lookupWord(word) {
-  if (_jotobaCache.has(word)) return _jotobaCache.get(word);
+  if (_jishoCache.has(word)) return _jishoCache.get(word);
   try {
-    const res = await fetch(JOTOBA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: word, language: 'English', no_english: false })
-    });
+    const res = await fetch(`${JISHO_URL}?keyword=${encodeURIComponent(word)}`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const words = data.words || [];
-    // Find best match: exact kanji or kana match first
-    const exact = words.find(w =>
-      (w.reading?.kanji === word) || (w.reading?.kana === word)
-    ) || words[0] || null;
+    const words = data.data || [];
+
+    // Find best match: exact word or reading match first, then first result
+    const exact =
+      words.find(w => w.japanese?.some(j => j.word === word || j.reading === word)) ||
+      words[0] || null;
 
     let result = null;
     if (exact) {
-      const reading = exact.reading?.kana || exact.reading?.kanji || '';
+      const jp = exact.japanese?.[0] || {};
+      const reading = jp.reading || jp.word || '';
       const senses  = exact.senses || [];
-      const glosses = senses.flatMap(s => s.glosses || []).slice(0, 3).join('; ');
-      // pos is an array of objects like {Verb:{Godan:"Bu"}} or {Verb:"Intransitive"}
-      // Serialize them into a readable string e.g. "Godan verb (bu), Intransitive"
-      const posItems = (senses[0]?.pos || []).map(p => {
-        const key = Object.keys(p)[0];
-        const val = p[key];
-        if (val && typeof val === 'object') {
-          const subKey = Object.keys(val)[0];
-          const subVal = val[subKey];
-          return `${key} (${subKey}${subVal ? ' • ' + subVal : ''})`;
-        }
-        if (typeof val === 'string' && val !== key) return `${key} • ${val}`;
-        return key;
-      });
-      const pos = posItems.join(', ');
-      const pitchType = classifyPitch(exact.pitch || null);
-      result = { reading, meaning: glosses, pos, pitchType };
+      const glosses = senses.slice(0, 2)
+        .flatMap(s => (s.english_definitions || []).slice(0, 2))
+        .join('; ');
+      const pos = (senses[0]?.parts_of_speech || []).join(', ');
+      // Jisho has no pitch data — pitchType stays null
+      result = { reading, meaning: glosses, pos, pitchType: null };
     }
-    _jotobaCache.set(word, result);
+    _jishoCache.set(word, result);
     return result;
   } catch(e) {
-    _jotobaCache.set(word, null);
+    _jishoCache.set(word, null);
     return null;
   }
 }
@@ -676,10 +663,10 @@ function fallbackMeta(word) {
       return { reading: m.romaji || '', meaning: m.type || '' };
     }
   }
-  // Multi-char fallback: join onyomi readings
+  // Multi-char fallback: join readings, using kana characters as-is
   const readings = chars.map(ch => {
     if (JOYO_SET.has(ch)) return (KANJI_META[ch]?.onyomi || '').split('、')[0];
-    if (KANA_SET.has(ch)) return KANA_META[ch]?.romaji || '';
+    if (KANA_SET.has(ch)) return ch; // keep kana as kana, not romaji
     return '';
   }).filter(Boolean);
   return { reading: readings.join(''), meaning: '' };
